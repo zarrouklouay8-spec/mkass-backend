@@ -1,9 +1,26 @@
-// src/index.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { exec } = require('child_process'); // ✅ ADDED
 
 const app = express();
+
+// ── AUTO DB SETUP (NO CLI NEEDED) ───────────────────────────
+function runDatabaseSetup() {
+  if (process.env.RUN_DB_SETUP !== 'true') return;
+
+  console.log('Running database setup...');
+
+  exec('node src/db/migrate.js && node src/db/seed.js', (error, stdout, stderr) => {
+    if (error) {
+      console.error('Database setup failed:', error);
+      return;
+    }
+
+    if (stdout) console.log(stdout);
+    if (stderr) console.error(stderr);
+  });
+}
 
 // ── MIDDLEWARE ───────────────────────────────────────────────
 app.use(cors({
@@ -11,7 +28,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json({ limit: '10mb' })); // 10mb for base64 cover images
+
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── HEALTH CHECK ─────────────────────────────────────────────
@@ -47,6 +65,10 @@ app.use((err, req, res, next) => {
 
 // ── START ────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
+
+// ✅ RUN MIGRATIONS AUTOMATICALLY
+runDatabaseSetup();
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Mkass API running on port ${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
