@@ -48,13 +48,20 @@ router.post('/:salonId/appointments', async (req, res) => {
   try {
     let {
       clientName,
-      clientPhone,
-      services,
-      prices,
-      total,
-      date,
-      time,
-      note
+  customer_name,
+  customerName,
+  name,
+  phone,
+  clientPhone,
+  services,
+  service_names,
+  prices,
+  total,
+  date,
+  appointment_date,
+  time,
+  appointment_time,
+  note
     } = req.body;
 
     if (!clientName) {
