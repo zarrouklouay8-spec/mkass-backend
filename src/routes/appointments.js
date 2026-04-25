@@ -125,7 +125,7 @@ router.post('/:salonId/appointments', async (req, res) => {
 // ── POST walk-in (FIXED) ─────────────────────────────────────
 router.post('/:salonId/appointments/walkin', requireSalonAccess, async (req, res) => {
   try {
-    const { clientName, services, prices, total, payMode } = req.body;
+    const { clientName, customerName, customer_name, name, services, prices, total, payMode, paymentMode, payment } = req.body;  const finalClientName =   [clientName, customerName, customer_name, name]     .find(v => typeof v === 'string' && v.trim() !== '') || 'Client';  const finalPayMode = payMode || paymentMode || payment || 'cash';
 
     if (!services?.length) {
       return res.status(400).json({ error: 'services are required' });
@@ -153,14 +153,14 @@ router.post('/:salonId/appointments/walkin', requireSalonAccess, async (req, res
     `, [
       id,
       req.params.salonId,
-      clientName || 'Anonyme',
+      finalClientName,
       '',
       services,
       prices || [],
       total || 0,
       date,
       time,
-      payMode || 'cash'
+      finalPayMode,
     ]);
 
     res.status(201).json(rows[0]);
