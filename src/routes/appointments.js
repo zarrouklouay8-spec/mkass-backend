@@ -42,6 +42,42 @@ router.get('/:salonId/appointments/today', requireSalonAccess, async (req, res) 
     res.status(500).json({ error: 'Server error' });
   }
 });
+// ── GET slots (NEW) ──────────────────────────────────────────
+router.get('/:salonId/slots', async (req, res) => {
+  try {
+    const { date } = req.query;
+
+    if (!date) {
+      return res.status(400).json({ error: 'date is required' });
+    }
+
+    const ALL_SLOTS = [
+      '09:00','09:30','10:00','10:30','11:00','11:30',
+      '12:00','14:00','14:30','15:00','15:30','16:00',
+      '16:30','17:00','17:30'
+    ];
+
+    const { rows } = await pool.query(
+      `SELECT appt_time 
+       FROM appointments
+       WHERE salon_id = $1
+       AND appt_date = $2
+       AND status != 'cancelled'`,
+      [req.params.salonId, date]
+    );
+
+    const taken = rows.map(r => r.appt_time);
+
+    res.json(ALL_SLOTS.map(time => ({
+      time,
+      available: !taken.includes(time)
+    })));
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // ── POST booking (FIXED CLEAN) ───────────────────────────────
 router.post('/:salonId/appointments', async (req, res) => {
@@ -70,14 +106,14 @@ router.post('/:salonId/appointments', async (req, res) => {
 
     // ✅ Validate
     if (!finalClientName) {
-      return res.status(400).json({ error: 'clientName is required' });
+      return res.status(400).json({ error: 'Le nom du client est obligatoire' });
     }
 
     // Phone validation
     if (finalPhone) {
       const clean = finalPhone.replace(/\s+/g, '');
       if (!/^[0-9]{8}$/.test(clean) && !/^\+216[0-9]{8}$/.test(clean)) {
-        return res.status(400).json({ error: 'Invalid phone number' });
+        return res.status(400).json({ error: 'Numéro de téléphone invalide' });
       }
       clientPhone = clean;
     }
@@ -96,7 +132,7 @@ router.post('/:salonId/appointments', async (req, res) => {
   const bookingDate = new Date(safeDate + 'T00:00:00');
 
   if (bookingDate < tomorrow) {
-  return res.status(400).json({ error: 'Booking must be from tomorrow or later' });
+  return res.status(400).json({ error: 'La réservation doit être à partir de demain' });
 }
 
 // Prevent double booking
@@ -110,7 +146,7 @@ const conflict = await pool.query(
 );
 
 if (conflict.rows.length > 0) {
-  return res.status(409).json({ error: 'This time slot is already booked' });
+  return res.status(409).json({ error: 'Ce créneau est déjà réservé' });
 }
     const id = 'MKS-' + Date.now();
 
