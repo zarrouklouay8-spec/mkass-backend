@@ -86,7 +86,32 @@ router.post('/:salonId/appointments', async (req, res) => {
     const now = new Date();
     const safeDate = date || appointment_date || now.toISOString().slice(0, 10);
     const safeTime = time || appointment_time || now.toTimeString().slice(0, 5);
+  // Booking must be from tomorrow minimum
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const bookingDate = new Date(safeDate + 'T00:00:00');
+
+  if (bookingDate < tomorrow) {
+  return res.status(400).json({ error: 'Booking must be from tomorrow or later' });
+}
+
+// Prevent double booking
+const conflict = await pool.query(
+  `SELECT id FROM appointments
+   WHERE salon_id = $1
+   AND appt_date = $2
+   AND appt_time = $3
+   AND status != 'cancelled'`,
+  [req.params.salonId, safeDate, safeTime]
+);
+
+if (conflict.rows.length > 0) {
+  return res.status(409).json({ error: 'This time slot is already booked' });
+}
     const id = 'MKS-' + Date.now();
 
     const { rows } = await pool.query(`
