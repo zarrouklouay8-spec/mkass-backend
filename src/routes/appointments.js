@@ -43,45 +43,49 @@ router.get('/:salonId/appointments/today', requireSalonAccess, async (req, res) 
   }
 });
 
-// ── POST booking (FIXED) ─────────────────────────────────────
+// ── POST booking (FIXED CLEAN) ───────────────────────────────
 router.post('/:salonId/appointments', async (req, res) => {
   try {
     let {
       clientName,
-  customer_name,
-  customerName,
-  name,
-  phone,
-  clientPhone,
-  services,
-  service_names,
-  prices,
-  total,
-  date,
-  appointment_date,
-  time,
-  appointment_time,
-  note
+      customer_name,
+      customerName,
+      name,
+      phone,
+      clientPhone,
+      services,
+      service_names,
+      prices,
+      total,
+      date,
+      appointment_date,
+      time,
+      appointment_time,
+      note
     } = req.body;
 
-    if (!clientName) {
+    // ✅ Map only (no fake values)
+    const finalClientName = clientName || customer_name || customerName || name;
+    const finalPhone = clientPhone || phone;
+
+    // ✅ Validate
+    if (!finalClientName) {
       return res.status(400).json({ error: 'clientName is required' });
     }
 
     // Phone validation
-    if (clientPhone) {
-      const clean = clientPhone.replace(/\s+/g, '');
-
+    if (finalPhone) {
+      const clean = finalPhone.replace(/\s+/g, '');
       if (!/^[0-9]{8}$/.test(clean) && !/^\+216[0-9]{8}$/.test(clean)) {
         return res.status(400).json({ error: 'Invalid phone number' });
       }
-
       clientPhone = clean;
     }
 
+    // Defaults
     const now = new Date();
-    const safeDate = date || now.toISOString().slice(0, 10);
-    const safeTime = time || now.toTimeString().slice(0, 5);
+    const safeDate = date || appointment_date || now.toISOString().slice(0, 10);
+    const safeTime = time || appointment_time || now.toTimeString().slice(0, 5);
 
     const id = 'MKS-' + Date.now();
 
@@ -100,9 +104,9 @@ router.post('/:salonId/appointments', async (req, res) => {
     `, [
       id,
       req.params.salonId,
-      clientName,
-      clientPhone || '',
-      services || [],
+      finalClientName,
+      finalPhone || '',
+      services || service_names || [],
       prices || [],
       total || 0,
       safeDate,
