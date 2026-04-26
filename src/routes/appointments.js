@@ -249,5 +249,32 @@ router.patch('/:salonId/appointments/:id/status', requireSalonAccess, async (req
     res.status(500).json({ error: 'Server error' });
   }
 });
+// GET bookings by phone
+router.get('/appointments/by-phone', async (req, res) => {
+  try {
+    let { phone } = req.query;
 
+    if (!phone) {
+      return res.status(400).json({ error: 'Numéro de téléphone obligatoire' });
+    }
+
+    phone = String(phone).replace(/\s+/g, '').trim();
+
+    const { rows } = await pool.query(
+      `SELECT 
+         a.*,
+         s.name AS salon_name
+       FROM appointments a
+       LEFT JOIN salons s ON s.id = a.salon_id
+       WHERE REPLACE(a.client_phone, ' ', '') = $1
+       ORDER BY a.appt_date DESC, a.appt_time DESC`,
+      [phone]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 module.exports = router;
