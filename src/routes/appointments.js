@@ -2,7 +2,31 @@
 const router = require('express').Router();
 const pool = require('../db/pool');
 const { requireAuth, requireSalonAccess } = require('../middleware/auth');
+// GET /api/salons/appointments/by-phone?phone=...
+router.get('/appointments/by-phone', async (req, res) => {
+  try {
+    let { phone } = req.query;
 
+    if (!phone) {
+      return res.status(400).json({ error: 'Numéro de téléphone obligatoire' });
+    }
+
+    phone = String(phone).replace(/\s+/g, '').trim();
+
+    const { rows } = await pool.query(
+      `SELECT *
+       FROM appointments
+       WHERE REPLACE(client_phone, ' ', '') = $1
+       ORDER BY appt_date DESC, appt_time DESC`,
+      [phone]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 // ── GET appointments ─────────────────────────────────────────
 router.get('/:salonId/appointments', requireSalonAccess, async (req, res) => {
   try {
