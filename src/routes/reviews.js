@@ -31,24 +31,33 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Vous pouvez laisser un avis uniquement après le rendez-vous terminé' });
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO reviews (
-        appointment_id,
-        salon_id,
-        client_name,
-        rating,
-        comment
-      )
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *`,
-      [
-        appt.id,
-        appt.salon_id,
-        appt.client_name || 'Client',
-        Number(rating),
-        comment || ''
-      ]
-    );
+   const clientName = appt.client_name || 'Client';
+const reviewText = comment || '';
+
+const { rows } = await pool.query(
+  `INSERT INTO reviews (
+    salon_id,
+    author_name,
+    author_phone,
+    text,
+    appointment_id,
+    client_name,
+    rating,
+    comment
+  )
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  RETURNING *`,
+  [
+    appt.salon_id,
+    clientName,
+    '',
+    reviewText,
+    String(appt.id),
+    clientName,
+    Number(rating),
+    reviewText
+  ]
+);
 
     res.status(201).json(rows[0]);
 
