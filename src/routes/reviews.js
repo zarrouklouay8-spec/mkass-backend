@@ -14,12 +14,16 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Note invalide' });
     }
 
-    const apptResult = await pool.query(
-      `SELECT id, salon_id, client_name, status
-       FROM appointments
-       WHERE id = $1`,
-      [appointmentId]
-    );
+const apptResult = await pool.query(
+  `SELECT 
+     id,
+     salon_id,
+     COALESCE(client_name, customer_name, name, 'Client') AS client_name,
+     status
+   FROM appointments
+   WHERE id::text = $1::text`,
+  [appointmentId]
+);
 
     if (!apptResult.rows.length) {
       return res.status(404).json({ error: 'Rendez-vous introuvable' });
