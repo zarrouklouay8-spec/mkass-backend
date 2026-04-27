@@ -41,28 +41,31 @@ router.post('/', async (req, res) => {
     const clientName = appt.client_name || 'Client';
     const clientPhone = appt.client_phone || '';
     const reviewText = comment || '';
+    const reviewRating = Number(rating);
 
     const { rows } = await pool.query(
       `INSERT INTO reviews (
         salon_id,
         author_name,
         author_phone,
+        stars,
         text,
         appointment_id,
         client_name,
         rating,
         comment
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *`,
       [
         appt.salon_id,
         clientName,
         clientPhone,
+        reviewRating,
         reviewText,
         String(appt.id),
         clientName,
-        Number(rating),
+        reviewRating,
         reviewText
       ]
     );
