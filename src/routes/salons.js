@@ -161,9 +161,11 @@ router.post('/', requireAdmin, async (req, res) => {
         tags,
         child_cut,
         color,
-        map_url
+        map_url,
+        plan,
+        subscription_status
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'active')
       RETURNING *
     `, [
       id,
@@ -177,7 +179,8 @@ router.post('/', requireAdmin, async (req, res) => {
       tags || [],
       childCut || false,
       color || '#C8FF00',
-      mapUrl
+      mapUrl,
+      req.body.plan || 'starter'
     ]);
 
     // Auto-seed default services for the salon type

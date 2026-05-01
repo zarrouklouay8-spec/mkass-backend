@@ -51,6 +51,8 @@ router.post('/login', async (req, res) => {
       salonId: salon.id,
       salonName: salon.name,
       icon: salon.icon,
+      plan: salon.plan || 'starter',
+      subscriptionStatus: salon.subscription_status || 'active',
     });
   } catch (err) {
     console.error('Login error:', err);

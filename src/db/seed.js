@@ -11,19 +11,19 @@ async function seed() {
 
     // ── SALONS ───────────────────────────────────────────────
     const salons = [
-      { id:'salon-nour',   username:'salon-nour',  password:'1234', name:'Salon Nour',   icon:'💇', type:'salon',       address:'Rue de Marseille, Lafayette, Tunis',    dist:'0.3 km', tags:['Coloration','Kératine','Mariée'], childCut:true,  color:'#a78bfa' },
-      { id:'barber-one',   username:'barber-one',  password:'5678', name:'Barber One',   icon:'💈', type:'barbershop',  address:'Avenue Habib Bourguiba, Centre-Ville',  dist:'0.7 km', tags:['Barbe','Rasage','Coupe moderne'], childCut:true,  color:'#34d399' },
-      { id:'studio-bella', username:'studio-bella',password:'0000', name:'Studio Bella', icon:'🌸', type:'mixte',       address:'Rue du Lac, Les Berges du Lac',         dist:'2.1 km', tags:['Soin','Extensions','Nail art'],   childCut:false, color:'#f472b6' },
-      { id:'coiff-kids',   username:'coiff-kids',  password:'0000', name:"Coiff & Kids", icon:'🧒', type:'enfant',      address:'Centre Commercial, La Marsa',           dist:'5.4 km', tags:['Enfants','Bébés','Fun'],          childCut:true,  color:'#fbbf24' },
+      { id:'salon-nour',   username:'salon-nour',  password:'1234', name:'Salon Nour',   icon:'💇', type:'salon',       address:'Rue de Marseille, Lafayette, Tunis',    dist:'0.3 km', tags:['Coloration','Kératine','Mariée'], childCut:true,  color:'#a78bfa', plan:'pro' },
+      { id:'barber-one',   username:'barber-one',  password:'5678', name:'Barber One',   icon:'💈', type:'barbershop',  address:'Avenue Habib Bourguiba, Centre-Ville',  dist:'0.7 km', tags:['Barbe','Rasage','Coupe moderne'], childCut:true,  color:'#34d399', plan:'starter' },
+      { id:'studio-bella', username:'studio-bella',password:'0000', name:'Studio Bella', icon:'🌸', type:'mixte',       address:'Rue du Lac, Les Berges du Lac',         dist:'2.1 km', tags:['Soin','Extensions','Nail art'],   childCut:false, color:'#f472b6', plan:'starter' },
+      { id:'coiff-kids',   username:'coiff-kids',  password:'0000', name:"Coiff & Kids", icon:'🧒', type:'enfant',      address:'Centre Commercial, La Marsa',           dist:'5.4 km', tags:['Enfants','Bébés','Fun'],          childCut:true,  color:'#fbbf24', plan:'starter' },
     ];
 
     for (const s of salons) {
       const hash = await bcrypt.hash(s.password, 10);
       await client.query(`
-        INSERT INTO salons (id, name, username, password, icon, type, address, dist, tags, child_cut, color)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        INSERT INTO salons (id, name, username, password, icon, type, address, dist, tags, child_cut, color, plan, subscription_status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active')
         ON CONFLICT (id) DO NOTHING
-      `, [s.id, s.name, s.username, hash, s.icon, s.type, s.address, s.dist, s.tags, s.childCut, s.color]);
+      `, [s.id, s.name, s.username, hash, s.icon, s.type, s.address, s.dist, s.tags, s.childCut, s.color, s.plan || 'starter']);
     }
 
     // ── DEFAULT SERVICES PER SALON ────────────────────────────
