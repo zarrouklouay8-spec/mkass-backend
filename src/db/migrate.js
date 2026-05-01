@@ -26,9 +26,18 @@ async function migrate() {
         child_cut   BOOLEAN DEFAULT false,
         color       TEXT DEFAULT '#C8FF00',
         cover_img   TEXT,                      -- base64 or URL
+        map_url     TEXT,
+        phone       TEXT,
+        plan        TEXT,
+        subscription_status TEXT DEFAULT 'active',
         created_at  TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+
+    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS map_url TEXT;`);
+    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS phone TEXT;`);
+    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS plan TEXT;`);
+    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';`);
 
     // ── SERVICES ─────────────────────────────────────────────
     await client.query(`
@@ -75,11 +84,41 @@ async function migrate() {
       );
     `);
 
+    // ── SUBSCRIPTIONS / PAYMENTS ──────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id SERIAL PRIMARY KEY,
+        salon_id TEXT NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+        plan TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        provider TEXT,
+        provider_payment_id TEXT,
+        amount NUMERIC(8,2),
+        currency TEXT DEFAULT 'TND',
+        payment_url TEXT,
+        starts_at TIMESTAMPTZ,
+        ends_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS payment_events (
+        id SERIAL PRIMARY KEY,
+        provider TEXT NOT NULL,
+        provider_payment_id TEXT,
+        event_type TEXT,
+        payload JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
     // ── INDEXES ──────────────────────────────────────────────
     await client.query(`CREATE INDEX IF NOT EXISTS idx_appt_salon   ON appointments(salon_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_appt_date    ON appointments(appt_date);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_svc_salon    ON services(salon_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_review_salon ON reviews(salon_id);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_sub_salon ON subscriptions(salon_id);`);
 
     await client.query('COMMIT');
     console.log('✅ Migration complete — all tables created.');

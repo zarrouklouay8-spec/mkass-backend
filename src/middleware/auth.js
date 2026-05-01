@@ -1,7 +1,6 @@
 // src/middleware/auth.js
 const jwt = require('jsonwebtoken');
 
-// Verifies JWT — attaches decoded payload to req.user
 function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
@@ -16,7 +15,6 @@ function requireAuth(req, res, next) {
   }
 }
 
-// Requires admin role
 function requireAdmin(req, res, next) {
   requireAuth(req, res, () => {
     if (req.user.role !== 'admin') {
@@ -26,7 +24,6 @@ function requireAdmin(req, res, next) {
   });
 }
 
-// Requires gérant to own the salon OR be admin
 function requireSalonAccess(req, res, next) {
   requireAuth(req, res, () => {
     const salonId = req.params.salonId || req.body.salonId;
