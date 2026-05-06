@@ -282,7 +282,16 @@ router.get('/:salonId/slots', async (req, res) => {
          AND staff_id IS NOT NULL`,
       [salonId, date]
     );
+const selectedDate = new Date(date + 'T12:00:00');
+const weekday = selectedDate.getDay();
 
+const { rows: hoursRows } = await pool.query(
+  `SELECT staff_id, weekday, start_time, end_time, active
+   FROM staff_working_hours
+   WHERE staff_id = ANY($1::int[])
+     AND weekday = $2`,
+  [staffRows.map(s => Number(s.staff_id)), weekday]
+);
     function toMinutes(time) {
       const [h, m] = String(time).slice(0, 5).split(':').map(Number);
       return h * 60 + m;
@@ -298,20 +307,38 @@ router.get('/:salonId/slots', async (req, res) => {
       const slotStart = toMinutes(time);
 
       const availableStaff = staffRows.find(staff => {
-        const staffId = Number(staff.staff_id);
-        const duration = Number(staff.total_duration || 30);
+  const staffId = Number(staff.staff_id);
+  const duration = Number(staff.total_duration || 30);
 
-        const staffAppointments = apptRows.filter(a => Number(a.staff_id) === staffId);
+  const hours = hoursRows.find(h => Number(h.staff_id) === staffId);
 
-        return !staffAppointments.some(appt => {
-          return overlaps(
-            slotStart,
-            duration,
-            toMinutes(appt.appt_time),
-            Number(appt.duration_minutes || 30)
-          );
-        });
-      });
+  // If no working hours were configured yet, keep old behavior:
+  // staff is considered available for all default slots.
+  if (hours && hours.active === false) {
+    return false;
+  }
+
+  if (hours) {
+    const workStart = toMinutes(hours.start_time);
+    const workEnd = toMinutes(hours.end_time);
+    const slotEnd = slotStart + duration;
+
+    if (slotStart < workStart || slotEnd > workEnd) {
+      return false;
+    }
+  }
+
+  const staffAppointments = apptRows.filter(a => Number(a.staff_id) === staffId);
+
+  return !staffAppointments.some(appt => {
+    return overlaps(
+      slotStart,
+      duration,
+      toMinutes(appt.appt_time),
+      Number(appt.duration_minutes || 30)
+    );
+  });
+});
 
       return {
         time,
