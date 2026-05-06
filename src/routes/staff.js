@@ -108,5 +108,101 @@ router.post('/:salonId/staff/:staffId/services', requireSalonAccess, async (req,
     res.status(500).json({ error: 'Server error' });
   }
 });
+// ── STAFF WORKING HOURS ──────────────────────────────────────
 
+// GET /api/salons/:salonId/staff/:staffId/hours
+router.get('/:salonId/staff/:staffId/hours', requireSalonAccess, async (req, res) => {
+  try {
+    const { salonId, staffId } = req.params;
+
+    const staffCheck = await pool.query(
+      `SELECT id FROM staff WHERE id = $1 AND salon_id = $2`,
+      [staffId, salonId]
+    );
+
+    if (staffCheck.rowCount === 0) {
+      return res.status(404).json({ error: 'Personnel introuvable' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT weekday, start_time, end_time, active
+       FROM staff_working_hours
+       WHERE staff_id = $1
+       ORDER BY weekday ASC`,
+      [staffId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+// POST /api/salons/:salonId/staff/:staffId/hours
+router.post('/:salonId/staff/:staffId/hours', requireSalonAccess, async (req, res) => {
+  try {
+    const { salonId, staffId } = req.params;
+    const { hours } = req.body;
+
+    if (!Array.isArray(hours)) {
+      return res.status(400).json({ error: 'Horaires invalides' });
+    }
+
+    const staffCheck = await pool.query(
+      `SELECT id FROM staff WHERE id = $1 AND salon_id = $2`,
+      [staffId, salonId]
+    );
+
+    if (staffCheck.rowCount === 0) {
+      return res.status(404).json({ error: 'Personnel introuvable' });
+    }
+
+    await pool.query('BEGIN');
+
+    for (const h of hours) {
+      const weekday = Number(h.weekday);
+      const startTime = h.start_time || h.startTime || '09:00';
+      const endTime = h.end_time || h.endTime || '18:00';
+      const active = h.active !== false;
+
+      if (weekday < 0 || weekday > 6) continue;
+
+      await pool.query(
+        `INSERT INTO staff_working_hours (
+          staff_id,
+          weekday,
+          start_time,
+          end_time,
+          active
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (staff_id, weekday)
+        DO UPDATE SET
+          start_time = EXCLUDED.start_time,
+          end_time = EXCLUDED.end_time,
+          active = EXCLUDED.active
+        RETURNING *`,
+        [staffId, weekday, startTime, endTime, active]
+      );
+    }
+
+    await pool.query('COMMIT');
+
+    const { rows } = await pool.query(
+      `SELECT weekday, start_time, end_time, active
+       FROM staff_working_hours
+       WHERE staff_id = $1
+       ORDER BY weekday ASC`,
+      [staffId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    await pool.query('ROLLBACK').catch(() => {});
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 module.exports = router;
