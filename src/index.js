@@ -45,6 +45,7 @@ const salonRoutes        = require('./routes/salons');
 const serviceRoutes      = require('./routes/services');
 const appointmentRoutes  = require('./routes/appointments');
 const balanceRoutes      = require('./routes/balance');
+const staffRoutes        = require('./routes/staff');
 const adminRoutes        = require('./routes/admin');
 
 app.use('/api/auth',    authRoutes);
@@ -52,6 +53,7 @@ app.use('/api/salons',  salonRoutes);
 app.use('/api/salons',  serviceRoutes);
 app.use('/api/salons',  appointmentRoutes);
 app.use('/api/salons',  balanceRoutes);
+app.use('/api/salons',  staffRoutes);
 app.use('/api/admin',   adminRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/gerants', gerantRoutes);
