@@ -50,12 +50,45 @@ router.post('/:salonId/staff', requireSalonAccess, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// GET /api/salons/:salonId/staff/:staffId/services
+router.get('/:salonId/staff/:staffId/services', requireSalonAccess, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         ss.id,
+         ss.staff_id,
+         ss.service_id,
+         ss.duration_minutes,
+         s.name AS service_name,
+         s.price,
+         s.category
+       FROM staff_services ss
+       JOIN services s ON s.id = ss.service_id
+       JOIN staff st ON st.id = ss.staff_id
+       WHERE ss.staff_id = $1
+         AND st.salon_id = $2
+       ORDER BY s.name ASC`,
+      [req.params.staffId, req.params.salonId]
+    );
 
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error', details: err.message });
+  }
+});
 // POST /api/salons/:salonId/staff/:staffId/services
 router.post('/:salonId/staff/:staffId/services', requireSalonAccess, async (req, res) => {
   try {
     const { serviceId, durationMinutes } = req.body;
+    const staffCheck = await pool.query(
+      `SELECT id FROM staff WHERE id = $1 AND salon_id = $2`,
+      [req.params.staffId, req.params.salonId]
+    );
 
+    if (staffCheck.rowCount === 0) {
+      return res.status(404).json({ error: 'Personnel introuvable' });
+    }
     if (!serviceId) {
       return res.status(400).json({ error: 'Service obligatoire' });
     }
