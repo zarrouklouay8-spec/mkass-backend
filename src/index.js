@@ -35,6 +35,65 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── HEALTH CHECK ─────────────────────────────────────────────
+app.get('/run-staff-migration-once', async (req, res) => {
+  const pool = require('./db/pool');
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS staff (
+        id          SERIAL PRIMARY KEY,
+        salon_id    TEXT NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        phone       TEXT DEFAULT '',
+        active      BOOLEAN DEFAULT true,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS staff_services (
+        id                SERIAL PRIMARY KEY,
+        staff_id          INT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+        service_id        INT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        duration_minutes  INT NOT NULL DEFAULT 30,
+        UNIQUE(staff_id, service_id)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS staff_working_hours (
+        id          SERIAL PRIMARY KEY,
+        staff_id    INT NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+        weekday     INT NOT NULL,
+        start_time  TEXT NOT NULL DEFAULT '09:00',
+        end_time    TEXT NOT NULL DEFAULT '18:00',
+        active      BOOLEAN DEFAULT true,
+        UNIQUE(staff_id, weekday)
+      );
+    `);
+
+    await pool.query(`
+      ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS staff_id INT REFERENCES staff(id) ON DELETE SET NULL;
+    `);
+
+    await pool.query(`
+      ALTER TABLE appointments
+      ADD COLUMN IF NOT EXISTS duration_minutes INT DEFAULT 30;
+    `);
+
+    res.json({
+      ok: true,
+      message: 'Staff migration completed'
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
+  }
+});
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'mkass-api', ts: new Date().toISOString() });
 });
