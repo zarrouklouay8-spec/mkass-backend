@@ -206,7 +206,130 @@ router.post('/', requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+// ── GET /api/salons/:salonId/slots ───────────────────────────
+// Public — smart slots based on assigned staff services
+// Example: /api/salons/salon-nour/slots?date=2026-05-10&serviceIds=1,2
+router.get('/:salonId/slots', async (req, res) => {
+  try {
+    const { salonId } = req.params;
+    const { date, serviceIds } = req.query;
 
+    if (!date) {
+      return res.status(400).json({ error: 'Date obligatoire' });
+    }
+
+    const requestedServiceIds = String(serviceIds || '')
+      .split(',')
+      .map(x => Number(x.trim()))
+      .filter(Boolean);
+
+    const allSlots = [
+      '09:00','09:30','10:00','10:30','11:00','11:30',
+      '12:00','14:00','14:30','15:00','15:30','16:00',
+      '16:30','17:00','17:30'
+    ];
+
+    if (requestedServiceIds.length === 0) {
+      const { rows: bookedRows } = await pool.query(
+        `SELECT appt_time
+         FROM appointments
+         WHERE salon_id = $1
+           AND appt_date = $2
+           AND status <> 'cancelled'`,
+        [salonId, date]
+      );
+
+      const bookedTimes = new Set(bookedRows.map(r => String(r.appt_time).slice(0, 5)));
+
+      return res.json(allSlots.map(time => ({
+        time,
+        available: !bookedTimes.has(time),
+        staffId: null,
+        durationMinutes: 30
+      })));
+    }
+
+    const { rows: staffRows } = await pool.query(
+      `SELECT
+         st.id AS staff_id,
+         SUM(ss.duration_minutes) AS total_duration,
+         COUNT(DISTINCT ss.service_id) AS matched_services
+       FROM staff st
+       JOIN staff_services ss ON ss.staff_id = st.id
+       WHERE st.salon_id = $1
+         AND st.active = true
+         AND ss.service_id = ANY($2::int[])
+       GROUP BY st.id
+       HAVING COUNT(DISTINCT ss.service_id) = $3`,
+      [salonId, requestedServiceIds, requestedServiceIds.length]
+    );
+
+    if (staffRows.length === 0) {
+      return res.json(allSlots.map(time => ({
+        time,
+        available: false,
+        staffId: null,
+        durationMinutes: 0
+      })));
+    }
+
+    const { rows: apptRows } = await pool.query(
+      `SELECT staff_id, appt_time, duration_minutes
+       FROM appointments
+       WHERE salon_id = $1
+         AND appt_date = $2
+         AND status <> 'cancelled'
+         AND staff_id IS NOT NULL`,
+      [salonId, date]
+    );
+
+    function toMinutes(time) {
+      const [h, m] = String(time).slice(0, 5).split(':').map(Number);
+      return h * 60 + m;
+    }
+
+    function overlaps(startA, durationA, startB, durationB) {
+      const endA = startA + durationA;
+      const endB = startB + durationB;
+      return startA < endB && startB < endA;
+    }
+
+    const result = allSlots.map(time => {
+      const slotStart = toMinutes(time);
+
+      const availableStaff = staffRows.find(staff => {
+        const staffId = Number(staff.staff_id);
+        const duration = Number(staff.total_duration || 30);
+
+        const staffAppointments = apptRows.filter(a => Number(a.staff_id) === staffId);
+
+        return !staffAppointments.some(appt => {
+          return overlaps(
+            slotStart,
+            duration,
+            toMinutes(appt.appt_time),
+            Number(appt.duration_minutes || 30)
+          );
+        });
+      });
+
+      return {
+        time,
+        available: Boolean(availableStaff),
+        staffId: availableStaff ? Number(availableStaff.staff_id) : null,
+        durationMinutes: availableStaff ? Number(availableStaff.total_duration || 30) : 0
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: 'Server error',
+      details: err.message
+    });
+  }
+});
 // ── DELETE /api/salons/:salonId ──────────────────────────────
 // Admin only
 router.delete('/:salonId', requireAdmin, async (req, res) => {
