@@ -205,4 +205,29 @@ router.post('/:salonId/staff/:staffId/hours', requireSalonAccess, async (req, re
     res.status(500).json({ error: 'Server error' });
   }
 });
+// DELETE /api/salons/:salonId/staff/:staffId
+router.delete('/:salonId/staff/:staffId', requireSalonAccess, async (req, res) => {
+  try {
+    const { salonId, staffId } = req.params;
+
+    const staffCheck = await pool.query(
+      `SELECT id FROM staff WHERE id = $1 AND salon_id = $2`,
+      [staffId, salonId]
+    );
+
+    if (staffCheck.rowCount === 0) {
+      return res.status(404).json({ error: 'Personnel introuvable' });
+    }
+
+    await pool.query(
+      `DELETE FROM staff WHERE id = $1 AND salon_id = $2`,
+      [staffId, salonId]
+    );
+
+    res.json({ ok: true, message: 'Personnel supprimé' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 module.exports = router;
