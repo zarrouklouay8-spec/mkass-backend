@@ -38,26 +38,32 @@ router.get('/appointments/by-phone', async (req, res) => {
 router.get('/:salonId/appointments', requireSalonAccess, async (req, res) => {
   try {
     const { date, status, type } = req.query;
-    let q = 'SELECT * FROM appointments WHERE salon_id = $1';
+    let q = `
+  SELECT 
+    a.*,
+    st.name AS staff_name
+  FROM appointments a
+  LEFT JOIN staff st ON st.id = a.staff_id
+  WHERE a.salon_id = $1
+`;
     const params = [req.params.salonId];
 
     if (date) {
-      params.push(date);
-      q += ` AND appt_date = $${params.length}`;
-    }
+  params.push(date);
+  q += ` AND a.appt_date = $${params.length}`;
+}
 
-    if (status) {
-      params.push(status);
-      q += ` AND status = $${params.length}`;
-    }
+if (status) {
+  params.push(status);
+  q += ` AND a.status = $${params.length}`;
+}
 
-    if (type) {
-      params.push(type);
-      q += ` AND type = $${params.length}`;
-    }
+if (type) {
+  params.push(type);
+  q += ` AND a.type = $${params.length}`;
+}
 
-    q += ' ORDER BY appt_date DESC, appt_time ASC';
-
+q += ' ORDER BY a.appt_date DESC, a.appt_time ASC';
     const { rows } = await pool.query(q, params);
     res.json(rows);
   } catch (err) {
