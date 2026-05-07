@@ -69,18 +69,17 @@ router.put('/:salonId', requireSalonAccess, async (req, res) => {
   try {
     const { salonId } = req.params;
 
-    const {
-      name,
-      address,
-      status,
-      icon,
-      tags,
-      childCut,
-      coverImg
-    } = req.body;
+ const {
+  name,
+  address,
+  status,
+  icon,
+  tags,
+  childCut
+} = req.body;
 
-    const mapUrl = req.body.map_url || req.body.mapUrl || null;
-
+const coverImg = req.body.cover_img || req.body.coverImg || null;
+const mapUrl = req.body.map_url || req.body.mapUrl || null;
     const { rows } = await pool.query(`
       UPDATE salons SET
         name       = COALESCE($1, name),
