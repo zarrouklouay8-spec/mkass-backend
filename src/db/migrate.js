@@ -164,6 +164,42 @@ async function migrate() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_review_salon ON reviews(salon_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_sub_salon ON subscriptions(salon_id);`);
 
+    // Better indexes for booking / staff scheduling performance
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_appointments_salon_date
+      ON appointments (salon_id, appt_date);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_appointments_staff_date
+      ON appointments (staff_id, appt_date);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_appointments_salon_date_time
+      ON appointments (salon_id, appt_date, appt_time);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_staff_salon
+      ON staff (salon_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_staff_services_service
+      ON staff_services (service_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_staff_services_staff
+      ON staff_services (staff_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_staff_working_hours_staff_weekday
+      ON staff_working_hours (staff_id, weekday);
+    `);
+
     await client.query('COMMIT');
     console.log('✅ Migration complete — all tables created.');
   } catch (err) {
