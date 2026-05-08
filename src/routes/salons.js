@@ -86,6 +86,14 @@ const coverImg = Object.prototype.hasOwnProperty.call(req.body, 'cover_img')
   : req.body.coverImg;
 
 const mapUrl = req.body.map_url || req.body.mapUrl || null;
+
+const lat = req.body.lat !== undefined && req.body.lat !== null && req.body.lat !== ''
+  ? Number(req.body.lat)
+  : null;
+
+const lng = req.body.lng !== undefined && req.body.lng !== null && req.body.lng !== ''
+  ? Number(req.body.lng)
+  : null;
    const { rows } = await pool.query(`
   UPDATE salons SET
     name       = COALESCE($1, name),
@@ -95,8 +103,10 @@ const mapUrl = req.body.map_url || req.body.mapUrl || null;
     tags       = COALESCE($5, tags),
     child_cut  = COALESCE($6, child_cut),
     cover_img  = CASE WHEN $7 THEN $8 ELSE cover_img END,
-    map_url    = COALESCE($9, map_url)
-  WHERE id = $10
+map_url    = COALESCE($9, map_url),
+lat        = COALESCE($10, lat),
+lng        = COALESCE($11, lng)
+WHERE id = $12
   RETURNING *
 `, [
   name,
@@ -108,6 +118,8 @@ const mapUrl = req.body.map_url || req.body.mapUrl || null;
   hasCoverImg,
   coverImg,
   mapUrl,
+  lat,
+  lng,
   salonId
 ]);
     if (!rows.length) {
