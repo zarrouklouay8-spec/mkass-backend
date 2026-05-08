@@ -217,7 +217,8 @@ router.post('/', requireAdmin, async (req, res) => {
 router.get('/:salonId/slots', async (req, res) => {
   try {
     const { salonId } = req.params;
-    const { date, serviceIds } = req.query;
+    const { date, serviceIds, staffId } = req.query;
+const requestedStaffId = staffId ? Number(staffId) : null;
 
     if (!date) {
       return res.status(400).json({ error: 'Date obligatoire' });
@@ -254,20 +255,30 @@ router.get('/:salonId/slots', async (req, res) => {
       })));
     }
 
-    const { rows: staffRows } = await pool.query(
-      `SELECT
-         st.id AS staff_id,
-         SUM(ss.duration_minutes) AS total_duration,
-         COUNT(DISTINCT ss.service_id) AS matched_services
-       FROM staff st
-       JOIN staff_services ss ON ss.staff_id = st.id
-       WHERE st.salon_id = $1
-         AND st.active = true
-         AND ss.service_id = ANY($2::int[])
-       GROUP BY st.id
-       HAVING COUNT(DISTINCT ss.service_id) = $3`,
-      [salonId, requestedServiceIds, requestedServiceIds.length]
-    );
+    const staffParams = [salonId, requestedServiceIds, requestedServiceIds.length];
+let staffFilterSql = '';
+
+if (requestedStaffId) {
+  staffParams.push(requestedStaffId);
+  staffFilterSql = `AND st.id = $${staffParams.length}`;
+}
+
+const { rows: staffRows } = await pool.query(
+  `SELECT
+     st.id AS staff_id,
+     st.name AS staff_name,
+     SUM(ss.duration_minutes) AS total_duration,
+     COUNT(DISTINCT ss.service_id) AS matched_services
+   FROM staff st
+   JOIN staff_services ss ON ss.staff_id = st.id
+   WHERE st.salon_id = $1
+     AND st.active = true
+     AND ss.service_id = ANY($2::int[])
+     ${staffFilterSql}
+   GROUP BY st.id, st.name
+   HAVING COUNT(DISTINCT ss.service_id) = $3`,
+  staffParams
+);
 
     if (staffRows.length === 0) {
       return res.json(allSlots.map(time => ({
@@ -345,12 +356,13 @@ const { rows: hoursRows } = await pool.query(
   });
 });
 
-      return {
-        time,
-        available: Boolean(availableStaff),
-        staffId: availableStaff ? Number(availableStaff.staff_id) : null,
-        durationMinutes: availableStaff ? Number(availableStaff.total_duration || 30) : 0
-      };
+return {
+  time,
+  available: Boolean(availableStaff),
+  staffId: availableStaff ? Number(availableStaff.staff_id) : null,
+  staffName: availableStaff ? availableStaff.staff_name : null,
+  durationMinutes: availableStaff ? Number(availableStaff.total_duration || 30) : 0
+};
     });
 
     res.json(result);
