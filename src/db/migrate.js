@@ -25,20 +25,23 @@ async function migrate() {
         tags        TEXT[] DEFAULT '{}',
         child_cut   BOOLEAN DEFAULT false,
         color       TEXT DEFAULT '#C8FF00',
-        cover_img   TEXT,                      -- base64 or URL
-        map_url     TEXT,
-        phone       TEXT,
-        plan        TEXT,
+       cover_img   TEXT,                      -- base64 or URL
+map_url     TEXT,
+lat         DOUBLE PRECISION,
+lng         DOUBLE PRECISION,
+phone       TEXT,
+plan        TEXT,
         subscription_status TEXT DEFAULT 'active',
         created_at  TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
     await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS map_url TEXT;`);
-    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS phone TEXT;`);
-    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS plan TEXT;`);
-    await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';`);
-
+await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION;`);
+await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION;`);
+await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS phone TEXT;`);
+await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS plan TEXT;`);
+await client.query(`ALTER TABLE salons ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active';`);
     // ── SERVICES ─────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS services (
