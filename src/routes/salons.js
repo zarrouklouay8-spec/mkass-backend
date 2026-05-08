@@ -247,14 +247,43 @@ const requestedStaffId = staffId ? Number(staffId) : null;
 
       const bookedTimes = new Set(bookedRows.map(r => String(r.appt_time).slice(0, 5)));
 
-      return res.json(allSlots.map(time => ({
-        time,
-        available: !bookedTimes.has(time),
-        staffId: null,
-        durationMinutes: 30
-      })));
+return res.json(allSlots.map(time => ({
+  time,
+  available: !bookedTimes.has(time),
+  staffId: null,
+  staffName: null,
+  durationMinutes: 30
+})));
     }
+const { rows: salonPlanRows } = await pool.query(
+  `SELECT plan FROM salons WHERE id = $1`,
+  [salonId]
+);
 
+const salonPlan = String(salonPlanRows[0]?.plan || 'starter').toLowerCase();
+
+if (salonPlan !== 'pro') {
+  const { rows: bookedRows } = await pool.query(
+    `SELECT appt_time
+     FROM appointments
+     WHERE salon_id = $1
+       AND appt_date = $2
+       AND status <> 'cancelled'`,
+    [salonId, date]
+  );
+
+  const bookedTimes = new Set(
+    bookedRows.map(r => String(r.appt_time).slice(0, 5))
+  );
+
+  return res.json(allSlots.map(time => ({
+    time,
+    available: !bookedTimes.has(time),
+    staffId: null,
+    staffName: null,
+    durationMinutes: 30
+  })));
+}
     const staffParams = [salonId, requestedServiceIds, requestedServiceIds.length];
 let staffFilterSql = '';
 
