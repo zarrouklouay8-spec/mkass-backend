@@ -78,32 +78,38 @@ router.put('/:salonId', requireSalonAccess, async (req, res) => {
   childCut
 } = req.body;
 
-const coverImg = req.body.cover_img || req.body.coverImg || null;
-const mapUrl = req.body.map_url || req.body.mapUrl || null;
-    const { rows } = await pool.query(`
-      UPDATE salons SET
-        name       = COALESCE($1, name),
-        address    = COALESCE($2, address),
-        status     = COALESCE($3, status),
-        icon       = COALESCE($4, icon),
-        tags       = COALESCE($5, tags),
-        child_cut  = COALESCE($6, child_cut),
-        cover_img  = COALESCE($7, cover_img),
-        map_url    = COALESCE($8, map_url)
-      WHERE id = $9
-      RETURNING *
-    `, [
-      name,
-      address,
-      status,
-      icon,
-      tags,
-      childCut,
-      coverImg,
-      mapUrl,
-      salonId
-    ]);
+const hasCoverImg = Object.prototype.hasOwnProperty.call(req.body, 'cover_img') ||
+                    Object.prototype.hasOwnProperty.call(req.body, 'coverImg');
 
+const coverImg = Object.prototype.hasOwnProperty.call(req.body, 'cover_img')
+  ? req.body.cover_img
+  : req.body.coverImg;
+
+const mapUrl = req.body.map_url || req.body.mapUrl || null;
+   const { rows } = await pool.query(`
+  UPDATE salons SET
+    name       = COALESCE($1, name),
+    address    = COALESCE($2, address),
+    status     = COALESCE($3, status),
+    icon       = COALESCE($4, icon),
+    tags       = COALESCE($5, tags),
+    child_cut  = COALESCE($6, child_cut),
+    cover_img  = CASE WHEN $7 THEN $8 ELSE cover_img END,
+    map_url    = COALESCE($9, map_url)
+  WHERE id = $10
+  RETURNING *
+`, [
+  name,
+  address,
+  status,
+  icon,
+  tags,
+  childCut,
+  hasCoverImg,
+  coverImg,
+  mapUrl,
+  salonId
+]);
     if (!rows.length) {
       return res.status(404).json({ error: 'Salon not found' });
     }
