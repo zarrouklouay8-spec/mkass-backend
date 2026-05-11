@@ -4,8 +4,18 @@ const pool = require('../db/pool');
 const bcrypt = require('bcryptjs');
 const { requireAdmin, requireSalonAccess } = require('../middleware/auth');
 
-// ── GET /api/salons ──────────────────────────────────────────
-// Public — list all salons for Explore page
+function toMinutes(time) {
+  const [h, m] = String(time).slice(0, 5).split(':').map(Number);
+  return h * 60 + m;
+}
+
+function overlaps(startA, durationA, startB, durationB) {
+  const endA = startA + durationA;
+  const endB = startB + durationB;
+  return startA < endB && startB < endA;
+}
+
+// Public - list all salons for Explore page
 router.get('/', async (req, res) => {
   try {
     const { type, status, search } = req.query;
@@ -53,10 +63,7 @@ router.get('/', async (req, res) => {
     `;
 
     const { rows } = await pool.query(query, params);
-
-    rows.forEach(row => {
-      delete row.password;
-    });
+    rows.forEach(row => delete row.password);
 
     res.json(rows);
   } catch (err) {
@@ -65,42 +72,324 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ── GET /api/salons/:salonId ─────────────────────────────────
-// Public — single salon with services, reviews, appointment count
+// Gerant - get salon opening hours
+router.get('/:salonId/hours', requireSalonAccess, async (req, res) => {
+  try {
+    const { salonId } = req.params;
+
+    const { rows } = await pool.query(
+      `SELECT weekday, active, start_time, end_time
+       FROM salon_opening_hours
+       WHERE salon_id = $1
+       ORDER BY weekday`,
+      [salonId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/salons/:salonId/hours error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Gerant - update salon opening hours
+router.put('/:salonId/hours', requireSalonAccess, async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { salonId } = req.params;
+    const { hours } = req.body;
+
+    if (!Array.isArray(hours)) {
+      return res.status(400).json({ error: 'hours must be an array' });
+    }
+
+    await client.query('BEGIN');
+
+    for (const h of hours) {
+      const weekday = Number(h.weekday);
+      const active = Boolean(h.active);
+      const startTime = String(h.start_time || h.startTime || '09:00').slice(0, 5);
+      const endTime = String(h.end_time || h.endTime || '18:00').slice(0, 5);
+
+      if (weekday < 0 || weekday > 6) continue;
+
+      await client.query(
+        `INSERT INTO salon_opening_hours (
+           salon_id,
+           weekday,
+           active,
+           start_time,
+           end_time
+         )
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (salon_id, weekday)
+         DO UPDATE SET
+           active = EXCLUDED.active,
+           start_time = EXCLUDED.start_time,
+           end_time = EXCLUDED.end_time`,
+        [salonId, weekday, active, startTime, endTime]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const { rows } = await pool.query(
+      `SELECT weekday, active, start_time, end_time
+       FROM salon_opening_hours
+       WHERE salon_id = $1
+       ORDER BY weekday`,
+      [salonId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('PUT /api/salons/:salonId/hours error:', err);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
+
+// Public - slots based on salon opening hours, plan, staff, and service duration
+router.get('/:salonId/slots', async (req, res) => {
+  try {
+    const { salonId } = req.params;
+    const { date, serviceIds, staffId } = req.query;
+    const requestedStaffId = staffId ? Number(staffId) : null;
+
+    if (!date) {
+      return res.status(400).json({ error: 'Date obligatoire' });
+    }
+
+    const requestedServiceIds = String(serviceIds || '')
+      .split(',')
+      .map(x => Number(x.trim()))
+      .filter(Boolean);
+
+    const allSlots = [
+      '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+      '12:00', '14:00', '14:30', '15:00', '15:30', '16:00',
+      '16:30', '17:00', '17:30'
+    ];
+
+    const selectedDate = new Date(date + 'T12:00:00');
+    const weekday = selectedDate.getDay();
+
+    const { rows: salonHoursRows } = await pool.query(
+      `SELECT active, start_time, end_time
+       FROM salon_opening_hours
+       WHERE salon_id = $1
+         AND weekday = $2`,
+      [salonId, weekday]
+    );
+
+    let allowedSlots = allSlots;
+
+    if (salonHoursRows.length) {
+      const h = salonHoursRows[0];
+
+      if (!h.active) {
+        return res.json(allSlots.map(time => ({
+          time,
+          available: false,
+          staffId: null,
+          staffName: null,
+          durationMinutes: 30
+        })));
+      }
+
+      const openStart = toMinutes(h.start_time);
+      const openEnd = toMinutes(h.end_time);
+
+      allowedSlots = allSlots.filter(time => {
+        const slotStart = toMinutes(time);
+        return slotStart >= openStart && slotStart < openEnd;
+      });
+    }
+
+    // Basic availability when no service is selected
+    if (requestedServiceIds.length === 0) {
+      const { rows: bookedRows } = await pool.query(
+        `SELECT appt_time
+         FROM appointments
+         WHERE salon_id = $1
+           AND appt_date = $2
+           AND status <> 'cancelled'`,
+        [salonId, date]
+      );
+
+      const bookedTimes = new Set(bookedRows.map(r => String(r.appt_time).slice(0, 5)));
+
+      return res.json(allowedSlots.map(time => ({
+        time,
+        available: !bookedTimes.has(time),
+        staffId: null,
+        staffName: null,
+        durationMinutes: 30
+      })));
+    }
+
+    const { rows: salonPlanRows } = await pool.query(
+      `SELECT plan FROM salons WHERE id = $1`,
+      [salonId]
+    );
+
+    const salonPlan = String(salonPlanRows[0]?.plan || 'starter').toLowerCase();
+
+    // Starter plan uses simple slot availability
+    if (salonPlan !== 'pro') {
+      const { rows: bookedRows } = await pool.query(
+        `SELECT appt_time
+         FROM appointments
+         WHERE salon_id = $1
+           AND appt_date = $2
+           AND status <> 'cancelled'`,
+        [salonId, date]
+      );
+
+      const bookedTimes = new Set(bookedRows.map(r => String(r.appt_time).slice(0, 5)));
+
+      return res.json(allowedSlots.map(time => ({
+        time,
+        available: !bookedTimes.has(time),
+        staffId: null,
+        staffName: null,
+        durationMinutes: 30
+      })));
+    }
+
+    // Pro plan: smart staff/service availability
+    const staffParams = [salonId, requestedServiceIds, requestedServiceIds.length];
+    let staffFilterSql = '';
+
+    if (requestedStaffId) {
+      staffParams.push(requestedStaffId);
+      staffFilterSql = `AND st.id = $${staffParams.length}`;
+    }
+
+    const { rows: staffRows } = await pool.query(
+      `SELECT
+         st.id AS staff_id,
+         st.name AS staff_name,
+         SUM(ss.duration_minutes) AS total_duration,
+         COUNT(DISTINCT ss.service_id) AS matched_services
+       FROM staff st
+       JOIN staff_services ss ON ss.staff_id = st.id
+       WHERE st.salon_id = $1
+         AND st.active = true
+         AND ss.service_id = ANY($2::int[])
+         ${staffFilterSql}
+       GROUP BY st.id, st.name
+       HAVING COUNT(DISTINCT ss.service_id) = $3`,
+      staffParams
+    );
+
+    if (staffRows.length === 0) {
+      return res.json(allowedSlots.map(time => ({
+        time,
+        available: false,
+        staffId: null,
+        staffName: null,
+        durationMinutes: 0
+      })));
+    }
+
+    const { rows: apptRows } = await pool.query(
+      `SELECT staff_id, appt_time, duration_minutes
+       FROM appointments
+       WHERE salon_id = $1
+         AND appt_date = $2
+         AND status <> 'cancelled'
+         AND staff_id IS NOT NULL`,
+      [salonId, date]
+    );
+
+    const { rows: hoursRows } = await pool.query(
+      `SELECT staff_id, weekday, start_time, end_time, active
+       FROM staff_working_hours
+       WHERE staff_id = ANY($1::int[])
+         AND weekday = $2`,
+      [staffRows.map(s => Number(s.staff_id)), weekday]
+    );
+
+    const result = allowedSlots.map(time => {
+      const slotStart = toMinutes(time);
+
+      const availableStaff = staffRows.find(staff => {
+        const staffIdNumber = Number(staff.staff_id);
+        const duration = Number(staff.total_duration || 30);
+
+        const hours = hoursRows.find(h => Number(h.staff_id) === staffIdNumber);
+
+        // If no staff working hours were configured yet, keep old behavior.
+        if (hours && hours.active === false) return false;
+
+        if (hours) {
+          const workStart = toMinutes(hours.start_time);
+          const workEnd = toMinutes(hours.end_time);
+          const slotEnd = slotStart + duration;
+
+          if (slotStart < workStart || slotEnd > workEnd) return false;
+        }
+
+        const staffAppointments = apptRows.filter(a => Number(a.staff_id) === staffIdNumber);
+
+        return !staffAppointments.some(appt => overlaps(
+          slotStart,
+          duration,
+          toMinutes(appt.appt_time),
+          Number(appt.duration_minutes || 30)
+        ));
+      });
+
+      return {
+        time,
+        available: Boolean(availableStaff),
+        staffId: availableStaff ? Number(availableStaff.staff_id) : null,
+        staffName: availableStaff ? availableStaff.staff_name : null,
+        durationMinutes: availableStaff ? Number(availableStaff.total_duration || 30) : 0
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('GET /api/salons/:salonId/slots error:', err);
+    res.status(500).json({
+      error: 'Server error',
+      details: err.message
+    });
+  }
+});
+
+// Public - single salon with services, reviews, appointment count
 router.get('/:salonId', async (req, res) => {
   try {
     const { salonId } = req.params;
 
     const [salonRes, servicesRes, reviewsRes] = await Promise.all([
       pool.query(
-        `
-        SELECT s.*,
+        `SELECT s.*,
           COUNT(DISTINCT a.id) AS total_appointments
-        FROM salons s
-        LEFT JOIN appointments a ON a.salon_id = s.id
-        WHERE s.id = $1
-        GROUP BY s.id
-        `,
+         FROM salons s
+         LEFT JOIN appointments a ON a.salon_id = s.id
+         WHERE s.id = $1
+         GROUP BY s.id`,
         [salonId]
       ),
-
       pool.query(
-        `
-        SELECT *
-        FROM services
-        WHERE salon_id = $1
-        ORDER BY category, name
-        `,
+        `SELECT *
+         FROM services
+         WHERE salon_id = $1
+         ORDER BY category, name`,
         [salonId]
       ),
-
       pool.query(
-        `
-        SELECT *
-        FROM reviews
-        WHERE salon_id = $1
-        ORDER BY created_at DESC
-        `,
+        `SELECT *
+         FROM reviews
+         WHERE salon_id = $1
+         ORDER BY created_at DESC`,
         [salonId]
       ),
     ]);
@@ -123,8 +412,7 @@ router.get('/:salonId', async (req, res) => {
   }
 });
 
-// ── PUT /api/salons/:salonId ─────────────────────────────────
-// Gérant updates their own salon settings
+// Gerant updates their own salon settings
 router.put('/:salonId', requireSalonAccess, async (req, res) => {
   try {
     const { salonId } = req.params;
@@ -163,8 +451,7 @@ router.put('/:salonId', requireSalonAccess, async (req, res) => {
         : null;
 
     const { rows } = await pool.query(
-      `
-      UPDATE salons SET
+      `UPDATE salons SET
         name       = COALESCE($1, name),
         address    = COALESCE($2, address),
         status     = COALESCE($3, status),
@@ -175,9 +462,8 @@ router.put('/:salonId', requireSalonAccess, async (req, res) => {
         map_url    = COALESCE($9, map_url),
         lat        = COALESCE($10, lat),
         lng        = COALESCE($11, lng)
-      WHERE id = $12
-      RETURNING *
-      `,
+       WHERE id = $12
+       RETURNING *`,
       [
         name,
         address,
@@ -206,8 +492,7 @@ router.put('/:salonId', requireSalonAccess, async (req, res) => {
   }
 });
 
-// ── POST /api/salons ─────────────────────────────────────────
-// Admin only — create a new salon / gérant account
+// Admin only - create a new salon / gerant account
 router.post('/', requireAdmin, async (req, res) => {
   try {
     const {
@@ -236,8 +521,7 @@ router.post('/', requireAdmin, async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
 
     const { rows } = await pool.query(
-      `
-      INSERT INTO salons (
+      `INSERT INTO salons (
         id,
         name,
         username,
@@ -254,8 +538,7 @@ router.post('/', requireAdmin, async (req, res) => {
         subscription_status
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'active')
-      RETURNING *
-      `,
+      RETURNING *`,
       [
         id,
         name,
@@ -277,10 +560,8 @@ router.post('/', requireAdmin, async (req, res) => {
 
     for (const sv of defaultSvcs) {
       await pool.query(
-        `
-        INSERT INTO services (salon_id, category, name, duration, price)
-        VALUES ($1,$2,$3,$4,$5)
-        `,
+        `INSERT INTO services (salon_id, category, name, duration, price)
+         VALUES ($1,$2,$3,$4,$5)`,
         [id, sv.cat, sv.name, sv.dur, sv.price]
       );
     }
@@ -297,232 +578,6 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 });
 
-// ── GET /api/salons/:salonId/slots ───────────────────────────
-// Public — smart slots based on assigned staff services
-// Example: /api/salons/salon-nour/slots?date=2026-05-10&serviceIds=1,2
-router.get('/:salonId/slots', async (req, res) => {
-  try {
-    const { salonId } = req.params;
-    const { date, serviceIds, staffId } = req.query;
-
-    const requestedStaffId = staffId ? Number(staffId) : null;
-
-    if (!date) {
-      return res.status(400).json({ error: 'Date obligatoire' });
-    }
-
-    const requestedServiceIds = String(serviceIds || '')
-      .split(',')
-      .map(x => Number(x.trim()))
-      .filter(Boolean);
-
-    const allSlots = [
-      '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-      '12:00', '14:00', '14:30', '15:00', '15:30', '16:00',
-      '16:30', '17:00', '17:30'
-    ];
-
-    // Basic availability when no service is selected
-    if (requestedServiceIds.length === 0) {
-      const { rows: bookedRows } = await pool.query(
-        `
-        SELECT appt_time
-        FROM appointments
-        WHERE salon_id = $1
-          AND appt_date = $2
-          AND status <> 'cancelled'
-        `,
-        [salonId, date]
-      );
-
-      const bookedTimes = new Set(
-        bookedRows.map(r => String(r.appt_time).slice(0, 5))
-      );
-
-      return res.json(
-        allSlots.map(time => ({
-          time,
-          available: !bookedTimes.has(time),
-          staffId: null,
-          staffName: null,
-          durationMinutes: 30
-        }))
-      );
-    }
-
-    // Check salon plan
-    const { rows: salonPlanRows } = await pool.query(
-      `SELECT plan FROM salons WHERE id = $1`,
-      [salonId]
-    );
-
-    const salonPlan = String(salonPlanRows[0]?.plan || 'starter').toLowerCase();
-
-    // Starter plan uses simple slot availability
-    if (salonPlan !== 'pro') {
-      const { rows: bookedRows } = await pool.query(
-        `
-        SELECT appt_time
-        FROM appointments
-        WHERE salon_id = $1
-          AND appt_date = $2
-          AND status <> 'cancelled'
-        `,
-        [salonId, date]
-      );
-
-      const bookedTimes = new Set(
-        bookedRows.map(r => String(r.appt_time).slice(0, 5))
-      );
-
-      return res.json(
-        allSlots.map(time => ({
-          time,
-          available: !bookedTimes.has(time),
-          staffId: null,
-          staffName: null,
-          durationMinutes: 30
-        }))
-      );
-    }
-
-    // Pro plan: smart staff/service availability
-    const staffParams = [salonId, requestedServiceIds, requestedServiceIds.length];
-    let staffFilterSql = '';
-
-    if (requestedStaffId) {
-      staffParams.push(requestedStaffId);
-      staffFilterSql = `AND st.id = $${staffParams.length}`;
-    }
-
-    const { rows: staffRows } = await pool.query(
-      `
-      SELECT
-        st.id AS staff_id,
-        st.name AS staff_name,
-        SUM(ss.duration_minutes) AS total_duration,
-        COUNT(DISTINCT ss.service_id) AS matched_services
-      FROM staff st
-      JOIN staff_services ss ON ss.staff_id = st.id
-      WHERE st.salon_id = $1
-        AND st.active = true
-        AND ss.service_id = ANY($2::int[])
-        ${staffFilterSql}
-      GROUP BY st.id, st.name
-      HAVING COUNT(DISTINCT ss.service_id) = $3
-      `,
-      staffParams
-    );
-
-    if (staffRows.length === 0) {
-      return res.json(
-        allSlots.map(time => ({
-          time,
-          available: false,
-          staffId: null,
-          staffName: null,
-          durationMinutes: 0
-        }))
-      );
-    }
-
-    const { rows: apptRows } = await pool.query(
-      `
-      SELECT staff_id, appt_time, duration_minutes
-      FROM appointments
-      WHERE salon_id = $1
-        AND appt_date = $2
-        AND status <> 'cancelled'
-        AND staff_id IS NOT NULL
-      `,
-      [salonId, date]
-    );
-
-    const selectedDate = new Date(date + 'T12:00:00');
-    const weekday = selectedDate.getDay();
-
-    const { rows: hoursRows } = await pool.query(
-      `
-      SELECT staff_id, weekday, start_time, end_time, active
-      FROM staff_working_hours
-      WHERE staff_id = ANY($1::int[])
-        AND weekday = $2
-      `,
-      [staffRows.map(s => Number(s.staff_id)), weekday]
-    );
-
-    function toMinutes(time) {
-      const [h, m] = String(time).slice(0, 5).split(':').map(Number);
-      return h * 60 + m;
-    }
-
-    function overlaps(startA, durationA, startB, durationB) {
-      const endA = startA + durationA;
-      const endB = startB + durationB;
-      return startA < endB && startB < endA;
-    }
-
-    const result = allSlots.map(time => {
-      const slotStart = toMinutes(time);
-
-      const availableStaff = staffRows.find(staff => {
-        const staffIdNumber = Number(staff.staff_id);
-        const duration = Number(staff.total_duration || 30);
-
-        const hours = hoursRows.find(h => Number(h.staff_id) === staffIdNumber);
-
-        // If no working hours were configured yet, keep old behavior:
-        // staff is considered available for all default slots.
-        if (hours && hours.active === false) {
-          return false;
-        }
-
-        if (hours) {
-          const workStart = toMinutes(hours.start_time);
-          const workEnd = toMinutes(hours.end_time);
-          const slotEnd = slotStart + duration;
-
-          if (slotStart < workStart || slotEnd > workEnd) {
-            return false;
-          }
-        }
-
-        const staffAppointments = apptRows.filter(
-          a => Number(a.staff_id) === staffIdNumber
-        );
-
-        return !staffAppointments.some(appt => {
-          return overlaps(
-            slotStart,
-            duration,
-            toMinutes(appt.appt_time),
-            Number(appt.duration_minutes || 30)
-          );
-        });
-      });
-
-      return {
-        time,
-        available: Boolean(availableStaff),
-        staffId: availableStaff ? Number(availableStaff.staff_id) : null,
-        staffName: availableStaff ? availableStaff.staff_name : null,
-        durationMinutes: availableStaff
-          ? Number(availableStaff.total_duration || 30)
-          : 0
-      };
-    });
-
-    res.json(result);
-  } catch (err) {
-    console.error('GET /api/salons/:salonId/slots error:', err);
-    res.status(500).json({
-      error: 'Server error',
-      details: err.message
-    });
-  }
-});
-
-// ── DELETE /api/salons/:salonId ──────────────────────────────
 // Admin only
 router.delete('/:salonId', requireAdmin, async (req, res) => {
   try {
@@ -536,69 +591,15 @@ router.delete('/:salonId', requireAdmin, async (req, res) => {
 
 function getDefaultServices(type) {
   const all = [
-    {
-      cat: 'Coupe',
-      name: 'Coupe femme',
-      dur: '45 min',
-      price: 35,
-      types: ['salon', 'mixte']
-    },
-    {
-      cat: 'Coupe',
-      name: 'Coupe homme',
-      dur: '30 min',
-      price: 20,
-      types: ['barbershop', 'mixte']
-    },
-    {
-      cat: 'Coupe',
-      name: 'Coupe enfant',
-      dur: '20 min',
-      price: 15,
-      types: ['salon', 'barbershop', 'mixte', 'enfant']
-    },
-    {
-      cat: 'Couleur',
-      name: 'Coloration complète',
-      dur: '90 min',
-      price: 80,
-      types: ['salon', 'mixte']
-    },
-    {
-      cat: 'Couleur',
-      name: 'Balayage / Mèches',
-      dur: '120 min',
-      price: 120,
-      types: ['salon', 'mixte']
-    },
-    {
-      cat: 'Soin',
-      name: 'Brushing',
-      dur: '30 min',
-      price: 25,
-      types: ['salon', 'mixte', 'enfant']
-    },
-    {
-      cat: 'Barbe',
-      name: 'Taille de barbe',
-      dur: '20 min',
-      price: 15,
-      types: ['barbershop', 'mixte']
-    },
-    {
-      cat: 'Barbe',
-      name: 'Barbe + coupe',
-      dur: '50 min',
-      price: 35,
-      types: ['barbershop', 'mixte']
-    },
-    {
-      cat: 'Ongles',
-      name: 'Manucure',
-      dur: '40 min',
-      price: 30,
-      types: ['salon', 'mixte']
-    },
+    { cat: 'Coupe', name: 'Coupe femme', dur: '45 min', price: 35, types: ['salon', 'mixte'] },
+    { cat: 'Coupe', name: 'Coupe homme', dur: '30 min', price: 20, types: ['barbershop', 'mixte'] },
+    { cat: 'Coupe', name: 'Coupe enfant', dur: '20 min', price: 15, types: ['salon', 'barbershop', 'mixte', 'enfant'] },
+    { cat: 'Couleur', name: 'Coloration complète', dur: '90 min', price: 80, types: ['salon', 'mixte'] },
+    { cat: 'Couleur', name: 'Balayage / Mèches', dur: '120 min', price: 120, types: ['salon', 'mixte'] },
+    { cat: 'Soin', name: 'Brushing', dur: '30 min', price: 25, types: ['salon', 'mixte', 'enfant'] },
+    { cat: 'Barbe', name: 'Taille de barbe', dur: '20 min', price: 15, types: ['barbershop', 'mixte'] },
+    { cat: 'Barbe', name: 'Barbe + coupe', dur: '50 min', price: 35, types: ['barbershop', 'mixte'] },
+    { cat: 'Ongles', name: 'Manucure', dur: '40 min', price: 30, types: ['salon', 'mixte'] },
   ];
 
   return all.filter(service => service.types.includes(type));
