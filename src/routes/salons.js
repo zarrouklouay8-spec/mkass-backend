@@ -9,12 +9,18 @@ const { requireAuth, requireAdmin, requireSalonAccess } = require('../middleware
 router.get('/', async (req, res) => {
   try {
     const { type, status, search } = req.query;
-    let query = `
-      SELECT s.*,
-        COALESCE(json_agg(r ORDER BY r.created_at DESC) FILTER (WHERE r.id IS NOT NULL), '[]') AS reviews
-      FROM salons s
-      LEFT JOIN reviews r ON r.salon_id = s.id
-    `;
+let query = `
+  SELECT s.*,
+    COALESCE(
+      json_agg(DISTINCT r ORDER BY r.created_at DESC)
+      FILTER (WHERE r.id IS NOT NULL),
+      '[]'
+    ) AS reviews,
+    COUNT(DISTINCT a.id) AS total_appointments
+  FROM salons s
+  LEFT JOIN reviews r ON r.salon_id = s.id
+  LEFT JOIN appointments a ON a.salon_id = s.id
+`;
     const conditions = [];
     const params = [];
     if (type && type !== 'all') {
@@ -30,7 +36,7 @@ router.get('/', async (req, res) => {
       conditions.push(`(s.name ILIKE $${params.length} OR s.address ILIKE $${params.length})`);
     }
     if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
-    query += ' GROUP BY s.id ORDER BY s.rating DESC, s.created_at ASC';
+query += ' GROUP BY s.id ORDER BY total_appointments DESC, s.rating DESC, s.created_at ASC';
     const { rows } = await pool.query(query, params);
     // Strip passwords before sending
     rows.forEach(r => delete r.password);
@@ -47,7 +53,15 @@ router.get('/:salonId', async (req, res) => {
   try {
     const { salonId } = req.params;
     const [salonRes, servicesRes, reviewsRes] = await Promise.all([
-      pool.query('SELECT * FROM salons WHERE id = $1', [salonId]),
+      pool.query('SELECT * FROM pool.query(
+  `SELECT s.*,
+    COUNT(DISTINCT a.id) AS total_appointments
+   FROM salons s
+   LEFT JOIN appointments a ON a.salon_id = s.id
+   WHERE s.id = $1
+   GROUP BY s.id`,
+  [salonId]
+),salons WHERE id = $1', [salonId]),
       pool.query('SELECT * FROM services WHERE salon_id = $1 ORDER BY category, name', [salonId]),
       pool.query('SELECT * FROM reviews WHERE salon_id = $1 ORDER BY created_at DESC', [salonId]),
     ]);
